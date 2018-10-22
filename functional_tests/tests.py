@@ -1,52 +1,95 @@
-from django.test import LiveServerTestCase
-from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
+from django.core.urlresolvers import resolve
+from django.test import TestCase
+from django.http import HttpRequest
+from django.template.loader import render_to_string
+from lists.views import home_page #1
+from lists.models import Item
 
-class NewVisitorTest(LiveServerTestCase):
+# Create your tests here.
+class HomePageTest(TestCase):
 
-    def setUp(self): #2
-        self.browser = webdriver.Chrome(r"E:\Programming Ebooks\Django\tdd_django\chapter-1\chromedriver.exe")
+    def test_root_url_resolves_to_home_page_view(self):
+        found = resolve('/') #2
+        self.assertEqual(found.func, home_page) #3
 
-    def test_can_start_a_list_and_retrieve_it_later(self):
-        # Edith has heard about a cool new online to-do app. She goes
-        # to check out its homepage
-        self.browser.get(self.live_server_url)
 
-        inputbox = self.browser.find_element_by_id('id_new_item')
-        inputbox.send_keys('Buy peacock feathers')
-        # When she hits enter, she is taken to a new URL,
-        # and now the page lists "1: Buy peacock feathers" as an item in a
-        # to-do list table
+    def test_home_page_returns_correct_html(self):
 
-        inputbox.send_keys(Keys.ENTER)
-        edith_list_url = self.browser.current_url
-        self.assertRegex(edith_list_url, '/lists/.+') #
-        self.check_for_row_in_list_table('1: Buy peacock feathers')
-        # The page updates again, and now shows both items on her list
-        self.check_for_row_in_list_table('2: Use peacock feathers to make a fly')
-        self.check_for_row_in_list_table('1: Buy peacock feathers')
-        # Now a new user, Francis, comes along to the site.
-        ## We use a new browser session to make sure that no information
-        ## of Edith's is coming through from cookies etc #
-        self.browser.quit()
-        self.browser = webdriver.Firefox()
-        # Francis visits the home page. There is no sign of Edith's
-        # list
-        self.browser.get(self.live_server_url)
-        page_text = self.browser.find_element_by_tag_name('body').text
-        self.assertNotIn('Buy peacock feathers', page_text)
-        self.assertNotIn('make a fly', page_text)
-        # Francis starts a new list by entering a new item. He
-        # is less interesting than Edith...
+        request = HttpRequest()
+        response = home_page(request)
+        expected_html = render_to_string('home.html')
+        self.assertEqual(response.content.decode(), expected_html)
+        #self.assertTrue(response.content.startswith(b'<html>'))
+        #self.assertIn(b'<title>To-Do lists</title>', response.content)
+        #self.assertTrue(response.content.strip().endswith(b'</html>'))
+    def test_home_page_can_save_a_POST_request(self):
 
-        inputbox.send_keys('Buy milk')
-        inputbox.send_keys(Keys.ENTER)
-        # Francis gets his own unique URL
-        francis_list_url = self.browser.current_url
-        self.assertRegex(francis_list_url, '/lists/.+')
-        self.assertNotEqual(francis_list_url, edith_list_url)
-        # Again, there is no trace of Edith's list
-        page_text = self.browser.find_element_by_tag_name('body').text
-        self.assertNotIn('Buy peacock feathers', page_text)
-        self.assertIn('Buy milk', page_text)
-        # Satisfied,
+        request = HttpRequest()
+        request.method = 'POST'
+        request.POST['item_text'] = 'A new list item'
+
+        response = home_page(request)
+
+        self.assertEqual(Item.objects.count(), 1)
+        new_item = Item.objects.first()
+        self.assertEqual(new_item.text, 'A new list item')
+
+        self.assertEqual(response.status_code,  302)
+        self.assertEqual(response['location'], '/lists/the-only-list-in-the-world/')
+
+    def test_home_page_only_saves_items_when_necessary(self):
+        request = HttpRequest()
+        home_page(request)
+        self.assertEqual(Item.objects.count(), 0)
+
+    def test_home_page_redirects_after_POST(self):
+        request = HttpRequest()
+        request.method = 'POST'
+        request.POST['item_text'] = 'A new list item'
+
+        response = home_page(request)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['location'], '/lists/the-only-list-in-the-world/')
+
+    #def test_home_page_displays_all_list_items(self):
+    #    Item.objects.create(text ='itemey 1')
+    #    Item.objects.create(text ='itemey 2')
+    #    request = HttpRequest()
+    #    response = home_page(request)
+
+    #    self.assertIn('itemey 1', response.content.decode())
+    #    self.assertIn('itemey 2', response.content.decode())
+
+
+class ItemModelTest(TestCase):
+
+    def text_saving_and_retrieving_items(self):
+        first_item = Item()
+        first_item.text = 'The first (ever) list item'
+        first_item.save()
+
+        second_item = Item()
+        second_item.text = 'Item the second'
+        second_item.save()
+
+        saved_itemss = Item.objects.all()
+        self.assertEqual(saved_items.count(),2)
+        first_saved_item = saved_items[0]
+        second_saved_item = saved_items[1]
+        self.assertEqual(first_saved_item.text, 'The first (ever) list item')
+        self.assertEqual(second_saved_item.text, 'Item the second')
+
+
+class ListViewTest(TestCase):
+
+    def test_uses_list_template(self):
+        response = self.client.get('/lists/the-only-list-in-the-world/')
+        self.assertTemplateUsed(response, 'list.html')
+
+    def test_displays_all_items(self):
+        Item.objects.create(text='itemey 1')
+        Item.objects.create(text='itemey 2')
+
+        response = self.client.get('/lists/the-only-list-in-the-world/')
+        self.assertContains(response, 'itemey 1')
+        self.assertContains(response, 'itemey 2')
